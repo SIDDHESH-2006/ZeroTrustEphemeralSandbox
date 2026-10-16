@@ -72,6 +72,7 @@ typedef enum {
 struct path_rule {
     char path[PATH_MAX];
     path_access_t access;
+    bool is_default;      /* true if auto-added default system path */
 };
 
 struct sandbox_config {

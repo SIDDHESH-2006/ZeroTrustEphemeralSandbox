@@ -36,10 +36,18 @@ void cli_print_usage(const char *prog_name) {
     printf("  %s --drop-caps --rw /tmp -- /bin/ls -la /tmp\n", prog_name);
 }
 
-static int add_rule(struct sandbox_config *config, const char *path, path_access_t access) {
+static int add_rule(struct sandbox_config *config, const char *path, path_access_t access, bool is_default) {
     if (config->rule_count >= MAX_PATH_RULES) {
         sb_log_error("Maximum number of path rules (%d) exceeded", MAX_PATH_RULES);
         return -1;
+    }
+
+    if (!is_default) {
+        struct stat st;
+        if (stat(path, &st) != 0) {
+            sb_log_error("Specified path does not exist or cannot be accessed: %s (%s)", path, strerror(errno));
+            return -1;
+        }
     }
 
     char resolved[PATH_MAX];
@@ -57,6 +65,9 @@ static int add_rule(struct sandbox_config *config, const char *path, path_access
             if (access == ACCESS_RW) {
                 config->rules[i].access = ACCESS_RW;
             }
+            if (!is_default) {
+                config->rules[i].is_default = false;
+            }
             return 0;
         }
     }
@@ -65,6 +76,7 @@ static int add_rule(struct sandbox_config *config, const char *path, path_access
              sizeof(config->rules[config->rule_count].path),
              "%s", target);
     config->rules[config->rule_count].access = access;
+    config->rules[config->rule_count].is_default = is_default;
     config->rule_count++;
 
     return 0;
@@ -89,7 +101,7 @@ int cli_add_default_paths(struct sandbox_config *config) {
     for (size_t i = 0; i < count; i++) {
         struct stat st;
         if (stat(default_ro_paths[i], &st) == 0) {
-            if (add_rule(config, default_ro_paths[i], ACCESS_RO) != 0) {
+            if (add_rule(config, default_ro_paths[i], ACCESS_RO, true) != 0) {
                 return -1;
             }
         }
@@ -103,7 +115,7 @@ int cli_add_default_paths(struct sandbox_config *config) {
     for (size_t i = 0; i < count; i++) {
         struct stat st;
         if (stat(default_rw_paths[i], &st) == 0) {
-            if (add_rule(config, default_rw_paths[i], ACCESS_RW) != 0) {
+            if (add_rule(config, default_rw_paths[i], ACCESS_RW, true) != 0) {
                 return -1;
             }
         }
@@ -124,6 +136,7 @@ int cli_parse_args(int argc, char *argv[], struct sandbox_config *config) {
         {"ro",               required_argument, 0, 'r'},
         {"rw",               required_argument, 0, 'w'},
         {"no-net",           no_argument,       0, 'n'},
+        {"deny-net",         no_argument,       0, 'n'},
         {"allow-net",        no_argument,       0, 1001},
         {"unshare-net",      no_argument,       0, 1002},
         {"drop-caps",        no_argument,       0, 1003},
@@ -151,12 +164,12 @@ int cli_parse_args(int argc, char *argv[], struct sandbox_config *config) {
     while ((opt = getopt_long(argc, argv, "+r:w:nvh", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'r':
-                if (add_rule(config, optarg, ACCESS_RO) != 0) {
+                if (add_rule(config, optarg, ACCESS_RO, false) != 0) {
                     return -1;
                 }
                 break;
             case 'w':
-                if (add_rule(config, optarg, ACCESS_RW) != 0) {
+                if (add_rule(config, optarg, ACCESS_RW, false) != 0) {
                     return -1;
                 }
                 break;

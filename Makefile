@@ -5,6 +5,10 @@ PREFIX ?= /usr/local
 TARGET = bin/sandbox
 SRCS = src/main.c src/cli.c src/isolate.c src/landlock_mgr.c src/seccomp_bpf.c
 OBJS = $(patsubst src/%.c,build/%.o,$(SRCS))
+HEADERS = include/sandbox.h include/cli.h include/isolate.h include/landlock_mgr.h include/seccomp_bpf.h
+
+BENCH_TARGET = benchmarks/bench_timer
+BENCH_SRC = benchmarks/bench_timer.c
 
 .PHONY: all clean test bench install uninstall
 
@@ -13,20 +17,23 @@ all: $(TARGET)
 $(TARGET): $(OBJS) | bin
 	$(CC) $(CFLAGS) $(OBJS) -o $@
 
-build/%.o: src/%.c | build
+build/%.o: src/%.c $(HEADERS) | build
 	$(CC) $(CFLAGS) -c $< -o $@
 
 bin build:
 	mkdir -p $@
 
 clean:
-	rm -rf bin build /tmp/sb_test_*
+	rm -rf bin build $(BENCH_TARGET) /tmp/sb_*
 
 test: $(TARGET)
 	@chmod +x tests/*.sh
 	@./tests/run_all.sh
 
-bench: $(TARGET)
+$(BENCH_TARGET): $(BENCH_SRC)
+	$(CC) -O2 $(BENCH_SRC) -o $@ -lm
+
+bench: $(TARGET) $(BENCH_TARGET)
 	@chmod +x benchmarks/*.sh
 	@./benchmarks/bench_startup.sh
 
