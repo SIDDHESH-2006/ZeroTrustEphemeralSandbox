@@ -1,22 +1,5 @@
 # Zero-Trust Ephemeral Sandbox (Landlock + Seccomp)
 
-**BCSE303P — Operating Systems Lab | Project Review - 1**  
-**School of Computer Science Engineering and Information Systems (SCSEIS)**  
-**Vellore Institute of Technology (VIT)**  
-*Fall Semester 2026–2027*
-
----
-
-### Project Team
-- **Mohammad Ammar Abdullah** — `24BYB0017`
-- **Siddhesh Srinivasan** — `24BYB0035`
-- **Aditi Soni** — `24BDE0144`
-
-**Faculty Guide:**  
-**Dr. PORKODI S**, Assistant Professor Senior Grade – 1, School of Computer Science Engineering and Information Systems
-
----
-
 ## 1. Abstract
 
 Modern software development frequently involves executing untrusted code, such as third-party package manager hooks (`npm install`, `pip setup.py`), AI-generated scripts, or dynamic binaries. Traditional isolation methods like virtual machines or containerization engines (e.g., Docker, Podman) incur significant startup latency, excessive resource overhead, and often require elevated root privileges, rendering them unsuitable for ephemeral, high-frequency command execution.
