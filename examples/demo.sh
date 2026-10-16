@@ -97,9 +97,10 @@ fi
 
 # Step 7: Deny debugging / ptrace inspection
 step_header "7" "Attempting ptrace() system call to trace processes"
+echo -e "Command: ${BOLD}$SANDBOX -- python3 -c 'import ctypes; libc=ctypes.CDLL(None, use_errno=True); ret=libc.ptrace(0,0,0,0); assert ret==0, f\"ptrace denied with errno {ctypes.get_errno()}\"'${NC}"
 if command -v python3 >/dev/null 2>&1; then
     set +e
-    err_out=$($SANDBOX -- python3 -c 'import ctypes; ctypes.CDLL(None).ptrace(0,0,0,0)' 2>&1)
+    err_out=$($SANDBOX -- python3 -c 'import ctypes; libc=ctypes.CDLL(None, use_errno=True); ret=libc.ptrace(0,0,0,0); assert ret==0, f"ptrace denied with errno {ctypes.get_errno()}"' 2>&1)
     exit_code=$?
     set -e
     echo "Output: $err_out"
