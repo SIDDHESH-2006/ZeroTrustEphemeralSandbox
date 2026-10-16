@@ -113,7 +113,53 @@ This outputs the compiled binary to `bin/sandbox`.
 
 ---
 
-## 7. Command-Line Reference
+## 7. How the Build System (Makefile) Works
+
+The project uses a standard POSIX `Makefile` as its central build and test automation orchestrator.
+
+### Compiler Configuration & Flags
+- `CC ?= gcc`: Defaults to GNU C Compiler, while allowing overrides (`make CC=clang`).
+- `CFLAGS = -Wall -Wextra -Werror -pedantic -std=c11 -D_GNU_SOURCE -O2 -Iinclude`:
+  - `-Wall -Wextra -Werror`: Zero tolerance for warnings—every compiler warning is treated as a fatal error.
+  - `-pedantic -std=c11`: Strict adherence to the standard ISO C11 specification.
+  - `-D_GNU_SOURCE`: Exposes modern Linux system calls and glibc extensions.
+  - `-O2`: Enables level 2 compiler optimization to ensure **sub-millisecond** execution speed.
+  - `-Iinclude`: Points the preprocessor to the header directory (`include/`).
+
+### Incremental Compilation & Pattern Rules
+- `build/%.o: src/%.c | build`: Pattern rule that compiles each `.c` source file into an object file in `build/`.
+- Make automatically tracks file modification timestamps. If only `src/cli.c` is edited, only `build/cli.o` is recompiled and re-linked, avoiding unnecessary recompilation of the whole codebase.
+- Order-only prerequisites (`| bin` and `| build`) ensure output directories are automatically created (`mkdir -p`) before placing target files into them.
+
+### Role of the Makefile in `make test`
+```makefile
+test: $(TARGET)
+	@chmod +x tests/*.sh
+	@./tests/run_all.sh
+```
+1. **Automatic Prerequisite Compilation (`$(TARGET)`)**: `test` explicitly depends on `bin/sandbox`. If the binary has not yet been built, or if any source file was modified, running `make test` automatically recompiles the binary before running any tests.
+2. **Permission Assurance (`@chmod +x tests/*.sh`)**: Automatically grants executable permissions to all test scripts, preventing permission denied errors.
+3. **Test Orchestration**: Executes `tests/run_all.sh`, which sequentially runs all 4 automated security test suites (CLI, Landlock filesystem, Seccomp network, and Seccomp ptrace). If any assertion fails, `make` immediately halts with a non-zero exit code.
+
+### Role of the Makefile in `make bench`
+```makefile
+bench: $(TARGET)
+	@chmod +x benchmarks/*.sh
+	@./benchmarks/bench_startup.sh
+```
+1. Guarantees that `bin/sandbox` is up to date and compiled with `-O2` optimizations before profiling.
+2. Ensures execute permissions on `benchmarks/bench_startup.sh`.
+3. Runs the microsecond-precision startup latency benchmark (100 iterations of `/bin/true` native vs sandboxed).
+
+### Role of `.PHONY`
+```makefile
+.PHONY: all clean test bench install uninstall
+```
+Declares non-file targets. Without `.PHONY`, if a file or directory named `test` or `bench` were created in the project root, Make would mistake it for the target and print `"test is up to date"`. `.PHONY` ensures that `make test`, `make bench`, and `make clean` always execute their recipes unconditionally.
+
+---
+
+## 8. Command-Line Reference
 
 ```
 Usage: ./bin/sandbox [options] -- <command> [args...]
@@ -151,7 +197,7 @@ Options:
 
 ---
 
-## 8. Automated Verification & Testing
+## 9. Automated Verification & Testing
 
 Run the full automated test suite:
 ```bash
@@ -165,7 +211,7 @@ The test suite validates:
 
 ---
 
-## 9. Performance Benchmark
+## 10. Performance Benchmark
 
 Measure startup latency overhead:
 ```bash
@@ -176,7 +222,7 @@ Executes 100 iterations of `/bin/true` natively vs inside `sandbox` to compute t
 
 ---
 
-## 10. References
+## 11. References
 1. Corbet, J. (2021). *Landlock comes to 5.13*. LWN.net.
 2. Linux Kernel Documentation. *Landlock: unprivileged access control*.
 3. Edge, J. (2015). *Seccomp BPF (SECure COMPuting with filters)*. LWN.net.
