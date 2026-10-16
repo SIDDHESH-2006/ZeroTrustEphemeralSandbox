@@ -14,22 +14,16 @@ if [ ! -r "/proc/self/status" ]; then
     exit 0
 fi
 
+CAT_BIN=$(command -v cat || echo "/bin/cat")
+
 # Run cat /proc/self/status inside the sandbox with capability dropping enabled
 set +e
-status_output=$($SANDBOX --drop-caps --ro /proc --ro /bin --ro /lib --ro /lib64 --ro /usr -- /bin/cat /proc/self/status 2>/dev/null)
+status_output=$($SANDBOX --drop-caps --ro /proc -- "$CAT_BIN" /proc/self/status 2>&1)
 exit_code=$?
 set -e
 
 if [ "$exit_code" -ne 0 ] || [ -z "$status_output" ]; then
-    # In some Landlock setups /proc may not be allowlisted by default unless specified
-    set +e
-    status_output=$($SANDBOX --drop-caps -- /bin/cat /proc/self/status 2>/dev/null)
-    exit_code=$?
-    set -e
-fi
-
-if [ "$exit_code" -ne 0 ] || [ -z "$status_output" ]; then
-    echo -e "${YELLOW}[SKIP]${NC} Unable to inspect /proc/self/status within sandbox"
+    echo -e "${YELLOW}[SKIP]${NC} Unable to inspect /proc/self/status within sandbox (exit $exit_code: $status_output)"
     exit 0
 fi
 

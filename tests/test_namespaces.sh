@@ -16,10 +16,11 @@ if [ ! -e "/proc/self/ns/net" ]; then
 fi
 
 PARENT_NET_NS=$(readlink /proc/self/ns/net 2>/dev/null || echo "")
+READLINK_BIN=$(command -v readlink || echo "/bin/readlink")
 
 # Test unshare invocation
 set +e
-child_net_ns=$($SANDBOX --unshare-net --ro /proc --ro /bin --ro /usr --ro /lib --ro /lib64 -- /bin/readlink /proc/self/ns/net 2>&1)
+child_net_ns=$($SANDBOX --unshare-net --ro /proc -- "$READLINK_BIN" /proc/self/ns/net 2>&1)
 exit_code=$?
 set -e
 
