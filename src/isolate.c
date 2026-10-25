@@ -41,9 +41,8 @@ int isolate_set_no_new_privs(void) {
 int isolate_drop_capabilities(void) {
     /* Step 1: Clear all ambient capabilities */
     if (prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) != 0) {
-        /* If the kernel doesn't support ambient capabilities, EINVAL is non-fatal */
-        if (errno != EINVAL) {
-            /* Emit warning if ambient capabilities clearing failed */
+        /* If PR_CAP_AMBIENT is not supported by older kernels, continue */
+        if (errno != EINVAL && errno != EOPNOTSUPP) {
             sb_log_warn("Failed to clear ambient capabilities: %s", strerror(errno));
         }
     }
@@ -65,8 +64,45 @@ int isolate_drop_capabilities(void) {
 
     /* Execute the capset system call with cleared masks */
     if (syscall(SYS_capset, &hdr, data) != 0) {
-        /* If running unprivileged, capset may return harmless errors if caps already 0 */
-        sb_log_debug(true, "Capset drop returned: %s", strerror(errno));
+        int capset_err = errno;
+        /*
+         * Verify whether capabilities are actually held.
+         * If capset() failed but the process already has no effective or permitted
+         * capabilities, then privileges are not retained (e.g. unprivileged user).
+         * If any prohibited capability is retained, fail safely.
+         */
+        struct __user_cap_data_struct cur_data[_LINUX_CAPABILITY_U32S_3];
+        memset(cur_data, 0, sizeof(cur_data));
+        if (syscall(SYS_capget, &hdr, cur_data) == 0) {
+            bool retains_caps = false;
+            for (int i = 0; i < _LINUX_CAPABILITY_U32S_3; i++) {
+                if (cur_data[i].effective != 0 || cur_data[i].permitted != 0) {
+                    retains_caps = true;
+                    break;
+                }
+            }
+            if (retains_caps) {
+                sb_log_error("Failed to drop capabilities and process retains privileges: %s", strerror(capset_err));
+                return -1;
+            }
+            sb_log_debug(true, "Capset returned %s but process has no capabilities (safe)", strerror(capset_err));
+        } else {
+            sb_log_error("Capset failed (%s) and capget verification failed: %s",
+                         strerror(capset_err), strerror(errno));
+            return -1;
+        }
+    } else {
+        /* Verify that effective capabilities are indeed zero */
+        struct __user_cap_data_struct check_data[_LINUX_CAPABILITY_U32S_3];
+        memset(check_data, 0, sizeof(check_data));
+        if (syscall(SYS_capget, &hdr, check_data) == 0) {
+            for (int i = 0; i < _LINUX_CAPABILITY_U32S_3; i++) {
+                if (check_data[i].effective != 0) {
+                    sb_log_error("Failed to clear effective capabilities");
+                    return -1;
+                }
+            }
+        }
     }
 
     /* Return success */
@@ -93,10 +129,8 @@ int isolate_namespaces(bool unshare_net, bool verbose) {
         sb_log_debug(verbose, "Unshare user+network namespace failed (%s), trying network only", strerror(errno));
         /* Attempt fallback to network-only unshare (succeeds if running with CAP_SYS_ADMIN) */
         if (unshare(CLONE_NEWNET) != 0) {
-            /* Emit warning and advise that Seccomp socket filter remains active */
-            sb_log_warn("Unable to unshare network namespace (%s). Falling back to Seccomp socket filter.", strerror(errno));
-            /* Return 0 to allow execution to proceed safely under Seccomp enforcement */
-            return 0;
+            sb_log_error("Failed to unshare network namespace: %s", strerror(errno));
+            return -1; /* Fail safely: requested namespace operation could not be established */
         }
     }
 

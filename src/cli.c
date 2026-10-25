@@ -72,12 +72,7 @@ void cli_print_usage(const char *prog_name) {
     printf("  %s --drop-caps --rw /tmp -- /bin/ls -la /tmp\n", prog_name);
 }
 
-/*
- * add_rule:
- * Adds a path rule to the configuration, converting to canonical path and checking duplicates.
- */
-static int add_rule(struct sandbox_config *config, const char *path, path_access_t access) {
-    /* Verify that maximum path rule capacity has not been reached */
+static int add_rule(struct sandbox_config *config, const char *path, path_access_t access, bool is_default) {
     if (config->rule_count >= MAX_PATH_RULES) {
         /* Output error notification if path limit exceeded */
         sb_log_error("Maximum number of path rules (%d) exceeded", MAX_PATH_RULES);
@@ -85,7 +80,14 @@ static int add_rule(struct sandbox_config *config, const char *path, path_access
         return -1;
     }
 
-    /* Buffer to hold canonical resolved path */
+    if (!is_default) {
+        struct stat st;
+        if (stat(path, &st) != 0) {
+            sb_log_error("Specified path does not exist or cannot be accessed: %s (%s)", path, strerror(errno));
+            return -1;
+        }
+    }
+
     char resolved[PATH_MAX];
     /* Default target pointer points to original path */
     const char *target = path;
@@ -105,7 +107,9 @@ static int add_rule(struct sandbox_config *config, const char *path, path_access
                 /* Upgrade access */
                 config->rules[i].access = ACCESS_RW;
             }
-            /* Return success without adding duplicate slot */
+            if (!is_default) {
+                config->rules[i].is_default = false;
+            }
             return 0;
         }
     }
@@ -116,7 +120,7 @@ static int add_rule(struct sandbox_config *config, const char *path, path_access
              "%s", target);
     /* Store access level (ACCESS_RO or ACCESS_RW) */
     config->rules[config->rule_count].access = access;
-    /* Increment total registered rule count */
+    config->rules[config->rule_count].is_default = is_default;
     config->rule_count++;
 
     /* Return success */
@@ -153,9 +157,7 @@ int cli_add_default_paths(struct sandbox_config *config) {
         struct stat st;
         /* Check if path exists on the host filesystem */
         if (stat(default_ro_paths[i], &st) == 0) {
-            /* Add existing path as read-only rule */
-            if (add_rule(config, default_ro_paths[i], ACCESS_RO) != 0) {
-                /* Return failure if rule addition fails */
+            if (add_rule(config, default_ro_paths[i], ACCESS_RO, true) != 0) {
                 return -1;
             }
         }
@@ -173,9 +175,7 @@ int cli_add_default_paths(struct sandbox_config *config) {
         struct stat st;
         /* Check if path exists */
         if (stat(default_rw_paths[i], &st) == 0) {
-            /* Add existing path as read-write rule */
-            if (add_rule(config, default_rw_paths[i], ACCESS_RW) != 0) {
-                /* Return failure */
+            if (add_rule(config, default_rw_paths[i], ACCESS_RW, true) != 0) {
                 return -1;
             }
         }
@@ -205,17 +205,18 @@ int cli_parse_args(int argc, char *argv[], struct sandbox_config *config) {
 
     /* Define long option mappings for GNU getopt_long */
     static struct option long_options[] = {
-        {"ro",               required_argument, 0, 'r'},   /* Read-only path */
-        {"rw",               required_argument, 0, 'w'},   /* Read-write path */
-        {"no-net",           no_argument,       0, 'n'},   /* Deny network access */
-        {"allow-net",        no_argument,       0, 1001},  /* Allow network access */
-        {"unshare-net",      no_argument,       0, 1002},  /* Unshare network namespace */
-        {"drop-caps",        no_argument,       0, 1003},  /* Drop capabilities */
-        {"no-default-paths", no_argument,       0, 1004},  /* Omit default system paths */
-        {"verbose",          no_argument,       0, 'v'},   /* Verbose logging */
-        {"help",             no_argument,       0, 'h'},   /* Display help message */
-        {"version",          no_argument,       0, 1005},  /* Display version info */
-        {0, 0, 0, 0}                                       /* End-of-array sentinel */
+        {"ro",               required_argument, 0, 'r'},
+        {"rw",               required_argument, 0, 'w'},
+        {"no-net",           no_argument,       0, 'n'},
+        {"deny-net",         no_argument,       0, 'n'},
+        {"allow-net",        no_argument,       0, 1001},
+        {"unshare-net",      no_argument,       0, 1002},
+        {"drop-caps",        no_argument,       0, 1003},
+        {"no-default-paths", no_argument,       0, 1004},
+        {"verbose",          no_argument,       0, 'v'},
+        {"help",             no_argument,       0, 'h'},
+        {"version",          no_argument,       0, 1005},
+        {0, 0, 0, 0}
     };
 
     /* Variable to hold option character */
@@ -247,17 +248,13 @@ int cli_parse_args(int argc, char *argv[], struct sandbox_config *config) {
     while ((opt = getopt_long(argc, argv, "+r:w:nvh", long_options, &option_index)) != -1) {
         /* Switch on option character or ID */
         switch (opt) {
-            case 'r': /* --ro <path> */
-                /* Add read-only path rule */
-                if (add_rule(config, optarg, ACCESS_RO) != 0) {
-                    /* Return failure */
+            case 'r':
+                if (add_rule(config, optarg, ACCESS_RO, false) != 0) {
                     return -1;
                 }
                 break;
-            case 'w': /* --rw <path> */
-                /* Add read-write path rule */
-                if (add_rule(config, optarg, ACCESS_RW) != 0) {
-                    /* Return failure */
+            case 'w':
+                if (add_rule(config, optarg, ACCESS_RW, false) != 0) {
                     return -1;
                 }
                 break;

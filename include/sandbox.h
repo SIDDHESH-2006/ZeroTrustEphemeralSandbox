@@ -84,8 +84,9 @@ typedef enum {
 
 /* Representation of an individual filesystem path rule */
 struct path_rule {
-    char path[PATH_MAX];    /* Absolute or canonical filesystem path string */
-    path_access_t access;   /* Access mode assigned to this path (RO or RW) */
+    char path[PATH_MAX];
+    path_access_t access;
+    bool is_default;      /* true if auto-added default system path */
 };
 
 /* Unified sandbox runtime configuration structure */

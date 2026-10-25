@@ -28,10 +28,8 @@ int landlock_apply_sandbox(const struct sandbox_config *config) {
     if (abi < 0) {
         /* Check if Landlock is simply not compiled or enabled in this kernel */
         if (errno == ENOSYS || errno == EOPNOTSUPP) {
-            /* Warn user that Landlock is unavailable, but Seccomp will still protect */
-            sb_log_warn("Landlock LSM is not supported or not enabled in this kernel (errno=%d)", errno);
-            /* Continue safely */
-            return 0;
+            sb_log_error("Landlock LSM is not supported or not enabled in this kernel (errno=%d)", errno);
+            return -1; /* Fail-safe: do not run payload without required filesystem barrier */
         }
         /* Report fatal error if ABI query failed unexpectedly */
         sb_log_error("Landlock ABI query failed: %s", strerror(errno));
@@ -93,14 +91,18 @@ int landlock_apply_sandbox(const struct sandbox_config *config) {
         const char *path = config->rules[i].path;
         /* Extract access mode (ACCESS_RO or ACCESS_RW) */
         path_access_t access_type = config->rules[i].access;
+        bool is_default = config->rules[i].is_default;
 
         /* Open path with O_PATH to obtain a lightweight file descriptor without read/write overhead */
         int fd = open(path, O_PATH | O_CLOEXEC);
         /* Check if opening the path failed (e.g., path does not exist on this machine) */
         if (fd < 0) {
-            /* Skip non-existent path and log debug notice */
-            sb_log_debug(config->verbose, "Skipping non-existent or inaccessible path: %s (%s)", path, strerror(errno));
-            /* Continue to next rule */
+            if (!is_default) {
+                sb_log_error("User-specified path does not exist or cannot be accessed: %s (%s)", path, strerror(errno));
+                close(ruleset_fd);
+                return -1;
+            }
+            sb_log_debug(config->verbose, "Skipping non-existent default path: %s", path);
             continue;
         }
 
@@ -108,9 +110,13 @@ int landlock_apply_sandbox(const struct sandbox_config *config) {
         struct stat st;
         /* Execute fstat on opened file descriptor */
         if (fstat(fd, &st) != 0) {
-            /* Log warning if stat fails */
-            sb_log_warn("Failed to stat path '%s': %s", path, strerror(errno));
-            /* Close file descriptor */
+            if (!is_default) {
+                sb_log_error("Failed to stat user-specified path '%s': %s", path, strerror(errno));
+                close(fd);
+                close(ruleset_fd);
+                return -1;
+            }
+            sb_log_warn("Failed to stat default path '%s': %s", path, strerror(errno));
             close(fd);
             /* Continue to next rule */
             continue;
@@ -143,8 +149,13 @@ int landlock_apply_sandbox(const struct sandbox_config *config) {
 
         /* Call SYS_landlock_add_rule to register this allowlist path with the ruleset */
         if (syscall(SYS_landlock_add_rule, ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &path_attr, 0) != 0) {
-            /* Log warning if adding the rule fails */
-            sb_log_warn("Failed to add Landlock rule for '%s': %s", path, strerror(errno));
+            if (!is_default) {
+                sb_log_error("Failed to add Landlock rule for user path '%s': %s", path, strerror(errno));
+                close(fd);
+                close(ruleset_fd);
+                return -1;
+            }
+            sb_log_warn("Failed to add Landlock rule for default path '%s': %s", path, strerror(errno));
         } else {
             /* Log successful rule addition in debug mode */
             sb_log_debug(config->verbose, "Allowed %s: %s",
